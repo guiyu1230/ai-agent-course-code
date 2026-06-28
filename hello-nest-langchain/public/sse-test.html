@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SSE 流式接口测试</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 720px;
+      margin: 2rem auto;
+      padding: 1rem;
+      background: #f5f5f5;
+    }
+
+    .container {
+      background: white;
+      padding: 1.5rem;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+
+    h1 {
+      margin: 0 0 1.5rem;
+      font-size: 1.5rem;
+      color: #1f2937;
+    }
+
+    .form-group {
+      margin-bottom: 1rem;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 0.5rem;
+      font-weight: 500;
+      color: #374151;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 0.75rem;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 1rem;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    input[type="text"]:focus {
+      outline: none;
+      border-color: #2563eb;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+
+    .button-group {
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 1rem;
+    }
+
+    button {
+      padding: 0.75rem 1.5rem;
+      font-size: 1rem;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s, opacity 0.2s;
+    }
+
+    button.primary {
+      background: #2563eb;
+      color: white;
+    }
+
+    button.primary:hover {
+      background: #1d4ed8;
+    }
+
+    button.secondary {
+      background: #f3f4f6;
+      color: #374151;
+    }
+
+    button.secondary:hover {
+      background: #e5e7eb;
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .status-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 0.75rem;
+      font-size: 0.875rem;
+      color: #6b7280;
+    }
+
+    .output-container {
+      margin-top: 1.5rem;
+    }
+
+    .output-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.5rem;
+    }
+
+    .output-header span {
+      font-size: 0.875rem;
+      color: #6b7280;
+    }
+
+    .output-actions {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .output-actions button {
+      padding: 0.25rem 0.75rem;
+      font-size: 0.75rem;
+      background: #e5e7eb;
+      color: #374151;
+    }
+
+    .output {
+      padding: 1rem;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      background: #fafafa;
+      min-height: 150px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.6;
+    }
+
+    .output:empty::before {
+      content: "回复将显示在这里...";
+      color: #9ca3af;
+    }
+
+    .loading-indicator {
+      display: none;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .loading-indicator.active {
+      display: flex;
+    }
+
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid #e5e7eb;
+      border-top-color: #2563eb;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>SSE 流式接口测试</h1>
+    
+    <div class="form-group">
+      <label for="apiUrl">API 地址</label>
+      <input type="text" id="apiUrl" value="http://localhost:3000" placeholder="http://localhost:3000" />
+    </div>
+    
+    <div class="form-group">
+      <label for="query">问题</label>
+      <input type="text" id="query" placeholder="例如：什么是 LangChain？" value="什么是 LangChain？" />
+    </div>
+    
+    <div class="button-group">
+      <button type="button" id="btn" class="primary">开始流式请求</button>
+      <button type="button" id="btnCancel" class="secondary" disabled>取消请求</button>
+      <button type="button" id="btnClear" class="secondary">清空</button>
+    </div>
+    
+    <div class="status-bar">
+      <div class="loading-indicator" id="loadingIndicator">
+        <div class="spinner"></div>
+        <span id="status">就绪</span>
+      </div>
+      <span id="charCount">字符数: 0</span>
+    </div>
+    
+    <div class="output-container">
+      <div class="output-header">
+        <span>输出</span>
+        <div class="output-actions">
+          <button type="button" id="btnCopy">复制</button>
+        </div>
+      </div>
+      <div class="output" id="output"></div>
+    </div>
+  </div>
+
+  <script>
+    const apiUrlInput = document.getElementById("apiUrl");
+    const queryInput = document.getElementById("query");
+    const btn = document.getElementById("btn");
+    const btnCancel = document.getElementById("btnCancel");
+    const btnClear = document.getElementById("btnClear");
+    const btnCopy = document.getElementById("btnCopy");
+    const output = document.getElementById("output");
+    const status = document.getElementById("status");
+    const loadingIndicator = document.getElementById("loadingIndicator");
+    const charCount = document.getElementById("charCount");
+
+    let eventSource = null;
+    let startTime = null;
+
+    function updateCharCount() {
+      charCount.textContent = `字符数: ${output.textContent.length}`;
+    }
+
+    function setStatus(text, isLoading = false) {
+      status.textContent = text;
+      if (isLoading) {
+        loadingIndicator.classList.add("active");
+      } else {
+        loadingIndicator.classList.remove("active");
+      }
+    }
+
+    function buildUrl(baseUrl, query) {
+      return `${baseUrl.replace(/\/$/, "")}/ai/chat/stream?query=${encodeURIComponent(query)}`;
+    }
+
+    function handleStream() {
+      const baseUrl = apiUrlInput.value;
+      const q = queryInput.value.trim();
+      
+      if (!q) {
+        setStatus("请输入问题");
+        return;
+      }
+
+      const url = buildUrl(baseUrl, q);
+      output.textContent = "";
+      updateCharCount();
+      
+      btn.disabled = true;
+      btnCancel.disabled = false;
+      startTime = Date.now();
+      setStatus("连接中...", true);
+
+      eventSource = new EventSource(url);
+
+      eventSource.onmessage = ({ data }) => {
+        output.textContent += data;
+        updateCharCount();
+        setStatus("接收中...", true);
+      };
+
+      eventSource.onerror = () => {
+        cleanup();
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+        setStatus(`连接结束 (耗时: ${elapsed}s)`);
+      };
+
+      eventSource.addEventListener("done", () => {
+        cleanup();
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+        setStatus(`完成 (耗时: ${elapsed}s)`);
+      });
+    }
+
+    function cleanup() {
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+      btn.disabled = false;
+      btnCancel.disabled = true;
+    }
+
+    function cancelRequest() {
+      if (eventSource) {
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+        eventSource.close();
+        cleanup();
+        setStatus(`已取消 (耗时: ${elapsed}s)`);
+      }
+    }
+
+    function clearOutput() {
+      output.textContent = "";
+      updateCharCount();
+      setStatus("就绪");
+    }
+
+    async function copyOutput() {
+      const text = output.textContent;
+      if (!text) {
+        setStatus("没有内容可复制");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(text);
+        setStatus("已复制到剪贴板");
+      } catch (err) {
+        setStatus("复制失败");
+      }
+    }
+
+    // 事件绑定
+    btn.addEventListener("click", handleStream);
+    btnCancel.addEventListener("click", cancelRequest);
+    btnClear.addEventListener("click", clearOutput);
+    btnCopy.addEventListener("click", copyOutput);
+
+    // 回车发送
+    queryInput.addEventListener("keypress", (e) => {
+      if (e.key === "Enter" && !btn.disabled) {
+        handleStream();
+      }
+    });
+  </script>
+</body>
+</html>
